@@ -1,0 +1,1014 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Построение линии — Satisfactory Planner{% endblock %}
+
+{% block content %}
+<div class="d-flex" style="gap: 0; height: calc(100vh - 80px); margin: -16px;">
+    <div class="flex-grow-1 bg-white border-end position-relative" id="build-area">
+        <canvas id="grid-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+        <div id="build-hint" class="position-absolute top-50 start-50 translate-middle text-muted text-center" style="pointer-events: none;">
+            <p class="fs-5">Выберите здание в панели справа</p>
+            <p class="small">и кликните на поле для размещения</p>
+            <p class="small mt-1"><b>Shift+ЛКМ</b> — соединить здания</p>
+        </div>
+        <div id="placing-indicator" class="position-absolute top-0 start-0 bg-primary text-white px-2 py-1 rounded-bottom d-none" style="font-size:0.8rem; z-index:10;">
+            Режим размещения. <b>ЛКМ</b> — поставить, <b>Esc</b> — отмена
+        </div>
+    </div>
+
+    <div class="bg-white border-start" style="width: 320px; display: flex; flex-direction: column; flex-shrink: 0;">
+        <div class="p-3 border-bottom">
+            <h6 class="fw-bold mb-2">Итоговые ресурсы линии:</h6>
+            <div id="outputs-container">
+                <p class="text-muted small">Добавьте Приёмник для отображения итогов</p>
+            </div>
+            <hr class="my-2">
+            <div class="d-flex justify-content-between small">
+                <span>Потребление:</span>
+                <strong id="consumption-value">0 МВт</strong>
+            </div>
+            <div class="d-flex justify-content-between small">
+                <span>Баланс сети:</span>
+                <strong id="balance-value" class="text-success">0 МВт</strong>
+            </div>
+            <div class="d-flex justify-content-between small">
+                <span>Всего зданий:</span>
+                <strong id="buildings-value">0</strong>
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-sm btn-link text-decoration-none p-0 small" onclick="toggleCosts()">
+                    📋 Показать стоимость
+                </button>
+                <div id="costs-block" class="d-none mt-1">
+                    <div id="costs-content"><p class="text-muted small">Нет данных</p></div>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm w-100 mt-2" id="btn-save">💾 Сохранить</button>
+            <button class="btn btn-outline-danger btn-sm w-100 mt-1" id="btn-new">🆕 Новая линия</button>
+            <div id="view-actions" class="d-none mt-2">
+                <button class="btn btn-sm w-100 mb-1" id="btn-like-view">
+                    🤍 Нравится
+                </button>
+                <button class="btn btn-sm w-100 mb-1" id="btn-bookmark-view">
+                    🔖 В закладки
+                </button>
+            </div>
+        </div>
+
+        <div class="p-2 border-bottom">
+            <input type="text" class="form-control form-control-sm" id="panel-search" placeholder="🔍 Поиск...">
+        </div>
+
+        <div class="d-flex border-bottom" id="panel-tabs">
+            <span class="flex-fill text-center py-2 tab-link active" data-tab="resources">Ресурсы</span>
+            <span class="flex-fill text-center py-2 tab-link" data-tab="recipes">Рецепты</span>
+            <span class="flex-fill text-center py-2 tab-link" data-tab="structures">Структуры</span>
+        </div>
+
+        <div class="flex-grow-1 overflow-auto p-2" id="tab-content"></div>
+    </div>
+</div>
+
+<div class="modal fade" id="main-modal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" id="main-modal-content"></div>
+    </div>
+</div>
+
+<script id="csrf-script">
+    // CSRF token from cookie
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    window.CSRF_TOKEN = getCookie('csrftoken');
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    #panel-tabs .tab-link { cursor: pointer; color: #888; font-size: 0.9rem; user-select: none; }
+    #panel-tabs .tab-link.active { color: #000; border-bottom: 2px solid var(--accent, #1e3a8a); font-weight: 500; }
+    .resource-card { width: 72px; padding: 4px; border: 1px solid #e5e5e5; border-radius: 6px; text-align: center; cursor: pointer; font-size: 0.7rem; background: #fff; transition: box-shadow 0.1s; }
+    .resource-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+    .resource-card img { width: 36px; height: 36px; object-fit: contain; }
+    .resource-card .placeholder-icon { width: 36px; height: 36px; font-size: 14px; margin: 0 auto; }
+    .resource-card .card-label { display: block; margin-top: 2px; line-height: 1.2; }
+    .section-title { font-size: 0.7rem; text-transform: uppercase; color: #aaa; letter-spacing: 0.5px; margin: 8px 0 4px; padding-left: 2px; }
+    .recipe-card { padding: 6px 8px; border: 1px solid #e5e5e5; border-radius: 6px; cursor: pointer; font-size: 0.72rem; background: #fff; margin-bottom: 4px; }
+    .recipe-card:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .recipe-card .ingredients img, .recipe-card .ingredients .placeholder-icon { width: 22px; height: 22px; font-size: 10px; }
+    .structure-card { width: 72px; padding: 4px; border: 1px solid #e5e5e5; border-radius: 6px; text-align: center; cursor: pointer; font-size: 0.7rem; background: #fff; }
+    .structure-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+    .structure-card .placeholder-icon { width: 36px; height: 36px; font-size: 14px; margin: 0 auto; }
+    .structure-card img { width: 36px; height: 36px; object-fit: contain; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function saveToLocalStorage() {
+        const data = {
+            buildings: LINE_STATE.buildings,
+            connections: LINE_STATE.connections,
+            nextId: LINE_STATE.nextId,
+        };
+        localStorage.setItem('satisfactory-line', JSON.stringify(data));
+    }
+
+    function loadFromLocalStorage() {
+        const raw = localStorage.getItem('satisfactory-line');
+        if (!raw) return false;
+        try {
+            const data = JSON.parse(raw);
+            LINE_STATE.buildings = data.buildings || [];
+            LINE_STATE.connections = data.connections || [];
+            LINE_STATE.nextId = data.nextId || 1;
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+
+    // ===== GLOBAL STATE =====
+    const LINE_STATE = {
+        buildings: [],
+        connections: [],
+        nextId: 1,
+        placingMode: null,
+    };
+    let connectingMode = null;
+    let calcResults = {};
+    let selectingMode = false;
+    let selectStart = { x: 0, y: 0 };
+    let selectEnd = { x: 0, y: 0 };
+    let selectedBuildings = new Set();
+
+    const CACHE = { items: {}, buildings: {}, recipes: {} };
+    const IMG_CACHE = {};
+    function preloadImage(url) {
+        if (!url || IMG_CACHE[url]) return;
+        const img = new Image(); img.src = url; IMG_CACHE[url] = img;
+    }
+
+    const CSRF_TOKEN = window.CSRF_TOKEN || '';
+
+    const canvas = document.getElementById('grid-canvas');
+    const ctx = canvas.getContext('2d');
+    const GRID_SIZE = 64;
+
+    let camera = { x: 0, y: 0 }, zoom = 1.0;
+    const MIN_ZOOM = 0.3, MAX_ZOOM = 3.0;
+    let isPanning = false, wasPanning = false;
+    let panStart = { x: 0, y: 0 }, cameraStart = { x: 0, y: 0 };
+    let mouseWorld = { x: 0, y: 0 }, mouseGrid = { x: 0, y: 0 };
+
+    resizeCanvas();
+    window.addEventListener('resize', () => { resizeCanvas(); drawAll(); });
+
+    function resizeCanvas() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width; canvas.height = rect.height;
+    }
+    function screenToWorld(sx, sy) { return { x: (sx - camera.x) / zoom, y: (sy - camera.y) / zoom }; }
+    function worldToGrid(wx, wy) { return { x: Math.floor(wx / GRID_SIZE), y: Math.floor(wy / GRID_SIZE) }; }
+    function updateMouseWorld(e) {
+        const rect = canvas.getBoundingClientRect();
+        mouseWorld = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        mouseGrid = worldToGrid(mouseWorld.x, mouseWorld.y);
+    }
+    function findBuildingAt(gx, gy) { return LINE_STATE.buildings.find(b => b.x === gx && b.y === gy); }
+
+    // ---- MOUSE ----
+    canvas.addEventListener('wheel', function(e) {
+        e.preventDefault(); updateMouseWorld(e);
+        const wx = mouseWorld.x, wy = mouseWorld.y;
+        zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+        zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+        const rect = canvas.getBoundingClientRect();
+        camera.x = (e.clientX - rect.left) - wx * zoom;
+        camera.y = (e.clientY - rect.top) - wy * zoom;
+        drawAll();
+    });
+
+    canvas.addEventListener('mousedown', function(e) {
+        updateMouseWorld(e);
+        const viewOnly = new URLSearchParams(window.location.search).get('view');
+        if (e.button === 0 && viewOnly && !e.shiftKey) {
+            return;
+        }
+        if (e.button === 2) {
+            e.preventDefault(); isPanning = true; wasPanning = false;
+            panStart = { x: e.clientX, y: e.clientY };
+            cameraStart = { x: camera.x, y: camera.y };
+            canvas.style.cursor = 'grabbing'; return;
+        }
+        if (e.button === 0 && e.ctrlKey && !LINE_STATE.placingMode && !connectingMode) {
+            // Find connection near click
+            const conn = findConnectionAt(mouseWorld.x, mouseWorld.y);
+            if (conn) {
+                deleteConnection(conn.id);
+            }
+            return;
+        }
+        if (e.button === 0 && connectingMode) {
+            const b = findBuildingAt(mouseGrid.x, mouseGrid.y);
+            if (b) { finishConnecting(b.id); return; }
+        }
+        if (e.button === 0 && e.shiftKey && !LINE_STATE.placingMode) {
+            const b = findBuildingAt(mouseGrid.x, mouseGrid.y);
+            if (b) { startConnecting(b.id); return; }
+        }
+        if (e.button === 0 && !LINE_STATE.placingMode && !connectingMode) {
+            const building = findBuildingAt(mouseGrid.x, mouseGrid.y);
+            if (building) {
+                if (selectedBuildings.has(building.id)) {
+                    openBuildingSettings(building);
+                } else {
+                    selectedBuildings.clear();
+                    selectedBuildings.add(building.id);
+                    drawAll();
+                }
+            } else {
+                // Start selection rectangle
+                selectingMode = true;
+                selectStart = { x: mouseWorld.x, y: mouseWorld.y };
+                selectEnd = { x: mouseWorld.x, y: mouseWorld.y };
+                selectedBuildings.clear();
+            }
+            return;
+        }
+        if (e.button === 0 && LINE_STATE.placingMode) {
+            placeAtGrid(mouseGrid.x, mouseGrid.y);
+        }
+    });
+
+    canvas.addEventListener('mousemove', function(e) {
+        updateMouseWorld(e);
+        if (isPanning) {
+            wasPanning = true;
+            camera.x = cameraStart.x + (e.clientX - panStart.x);
+            camera.y = cameraStart.y + (e.clientY - panStart.y);
+        }
+        if (selectingMode) {
+            selectEnd = { x: mouseWorld.x, y: mouseWorld.y };
+            // Find buildings in rectangle
+            const minX = Math.min(selectStart.x, selectEnd.x);
+            const maxX = Math.max(selectStart.x, selectEnd.x);
+            const minY = Math.min(selectStart.y, selectEnd.y);
+            const maxY = Math.max(selectStart.y, selectEnd.y);
+            selectedBuildings.clear();
+            LINE_STATE.buildings.forEach(b => {
+                const cx = b.x * GRID_SIZE + GRID_SIZE / 2;
+                const cy = b.y * GRID_SIZE + GRID_SIZE / 2;
+                if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+                    selectedBuildings.add(b.id);
+                }
+            });
+        }
+        drawAll();
+    });
+
+    canvas.addEventListener('mouseup', function(e) {
+        if (e.button === 2) { isPanning = false; if (!LINE_STATE.placingMode && !connectingMode) canvas.style.cursor = 'default'; }
+        if (e.button === 0) { setTimeout(() => wasPanning = false, 50); }
+        if (e.button === 0 && selectingMode) {
+            selectingMode = false;
+            drawAll();
+        }
+    });
+
+    document.getElementById('btn-save').addEventListener('click', () => saveLine(false));
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', function(e) {
+        // Escape — cancel modes
+        if (e.key === 'Escape') {
+            cancelPlacing();
+            cancelConnecting();
+        }
+
+        // Delete/Backspace — delete selected
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBuildings.size > 0) {
+            if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'SELECT') {
+                return;
+            }
+            saveUndoState();
+            for (const id of selectedBuildings) {
+                LINE_STATE.buildings = LINE_STATE.buildings.filter(b => b.id !== id);
+                LINE_STATE.connections = LINE_STATE.connections.filter(c => c.from !== id && c.to !== id);
+                delete calcResults[id];
+            }
+            selectedBuildings.clear();
+            if (LINE_STATE.buildings.length === 0) {
+                LINE_STATE.nextId = 1;
+                calcResults = {};
+                document.getElementById('outputs-container').innerHTML = '<p class="text-muted small">Добавьте Приёмник для отображения итогов</p>';
+                document.getElementById('consumption-value').textContent = '0 МВт';
+                document.getElementById('balance-value').textContent = '0 МВт';
+                document.getElementById('balance-value').className = 'text-success';
+                document.getElementById('buildings-value').textContent = '0';
+                document.getElementById('build-hint').style.display = '';
+            }
+            recalculateLine();
+            drawAll();
+        }
+
+        // Ctrl+Z — undo
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            undo();
+        }
+    });
+
+    // ---- PLACING ----
+    function enterPlacingMode(mode) {
+        LINE_STATE.placingMode = mode; canvas.style.cursor = 'crosshair';
+        document.getElementById('placing-indicator').classList.remove('d-none');
+        document.getElementById('build-hint').style.display = 'none';
+    }
+    function cancelPlacing() {
+        LINE_STATE.placingMode = null; canvas.style.cursor = 'default';
+        document.getElementById('placing-indicator').classList.add('d-none'); drawAll();
+    }
+    function placeAtGrid(gx, gy) {
+        saveUndoState()
+        const mode = LINE_STATE.placingMode; if (!mode) return;
+        const id = LINE_STATE.nextId++;
+        let b = { id, x: gx, y: gy, overclock: 1.0, somersloop: false, recipe: null, type: null };
+        if (mode.type === 'building') { b.type = CACHE.buildings[mode.buildingId]; if (mode.recipeId) b.recipe = CACHE.recipes[mode.recipeId]; }
+        else if (mode.type === 'externalInput') { b.type = { id: -1, name: 'Внешний ввод', category: 'special', icon_url: null, category_key: 'special', costs: [] }; b.externalInput = { item: CACHE.items[mode.itemId], rate: mode.rate || 30 }; }
+        else if (mode.type === 'extractor') { b.type = CACHE.buildings[mode.buildingId]; b.resourceItem = mode.resourceItem; b.resourcePurity = mode.purity; }
+        LINE_STATE.buildings.push(b); recalculateLine(); drawAll(); saveToLocalStorage();
+    }
+
+    // ---- CONNECTING ----
+    function startConnecting(fromId) { connectingMode = { fromBuildingId: fromId }; canvas.style.cursor = 'crosshair'; drawAll(); }
+    function cancelConnecting() { connectingMode = null; if (!LINE_STATE.placingMode) canvas.style.cursor = 'default'; drawAll(); }
+    function finishConnecting(toId) {
+        if (!connectingMode || connectingMode.fromBuildingId === toId) { cancelConnecting(); return; }
+        const exists = LINE_STATE.connections.some(c => c.from === connectingMode.fromBuildingId && c.to === toId);
+        if (exists) { cancelConnecting(); return; }
+        const fromB = LINE_STATE.buildings.find(b => b.id === connectingMode.fromBuildingId);
+        const toB = LINE_STATE.buildings.find(b => b.id === toId);
+        if (!fromB || !toB) { cancelConnecting(); return; }
+        let html = `<p>Соединение: <strong>#${fromB.id}</strong> → <strong>#${toB.id}</strong></p>`;
+        html += '<div class="mb-2"><label class="form-label small">Тип</label><select class="form-select form-select-sm" id="conn-type" onchange="updateConnLevels()"><option value="belt">Конвейер</option><option value="pipe">Труба</option></select></div>';
+        html += '<div class="mb-2"><label class="form-label small">Уровень</label><select class="form-select form-select-sm" id="conn-level"></select></div>';
+        html += `<button class="btn btn-primary btn-sm w-100" onclick="applyConnection(${toId})">Соединить</button>`;
+        showModal('Новое соединение', html); setTimeout(updateConnLevels, 50);
+    }
+    function updateConnLevels() {
+        const type = document.getElementById('conn-type')?.value || 'belt';
+        const sel = document.getElementById('conn-level');
+        if (!sel)
+            return;
+        sel.innerHTML = '';
+        const max = type === 'belt' ? 5 : 2;
+        for (let i = 1; i <= max; i++)
+            sel.innerHTML += `<option value="${i}">Mk.${i}</option>`;
+        saveToLocalStorage();
+    }
+
+    function applyConnection(toId) {
+        saveUndoState()
+        const type = document.getElementById('conn-type')?.value || 'belt';
+        const level = parseInt(document.getElementById('conn-level')?.value || 1);
+        LINE_STATE.connections.push({
+            id: LINE_STATE.connections.length + 1,
+            from: connectingMode.fromBuildingId, to: toId, type, level });
+        hideModal(); cancelConnecting(); recalculateLine(); drawAll(); saveToLocalStorage();
+    }
+
+    // ---- SETTINGS ----
+    function openBuildingSettings(building) {
+        const isExtractor = building.type?.category_key === 'extraction';
+        const isWaterExt = building.type?.name === 'Экстрактор воды';
+        const isOilExt = building.type?.name === 'Экстрактор нефти';
+        const isExternalInput = building.type?.id === -1;
+        const recipes = Object.values(CACHE.recipes).filter(r => r.building_id === building.type?.id);
+
+        let html = `<h6>${building.type?.name || 'Здание'} #${building.id}</h6>`;
+
+        if (isExtractor) {
+            html += `<input type="hidden" id="bld-extractor-id" value="${building.type?.id}">`;
+
+            if (isWaterExt) {
+                // Вода — фиксировано
+                const waterItem = Object.values(CACHE.items).find(i => i.name === 'Вода');
+                html += `<input type="hidden" id="bld-resource" value="${waterItem?.id || ''}">`;
+                html += `<input type="hidden" id="bld-purity" value="2.0">`;
+                html += '<p class="small text-muted">Ресурс: Вода (фиксировано)</p>';
+                html += '<p class="small text-muted">Богатство: Богатое (фиксировано)</p>';
+            } else if (isOilExt) {
+                // Нефть — фиксированный ресурс, богатство выбирается
+                const oilItem = Object.values(CACHE.items).find(i => i.name === 'Сырая нефть');
+                html += `<input type="hidden" id="bld-resource" value="${oilItem?.id || ''}">`;
+                html += '<p class="small text-muted">Ресурс: Сырая нефть (фиксировано)</p>';
+                html += '<div class="mb-2"><label class="form-label small">Богатство жилы</label><select class="form-select form-select-sm" id="bld-purity" onchange="updateExtractorPreview()">';
+                [{v:0.5,l:'Бедное'},{v:1.0,l:'Нормальное'},{v:2.0,l:'Богатое'}].forEach(p => {
+                    html += `<option value="${p.v}" ${(building.resourcePurity||1.0)===p.v?'selected':''}>${p.l}</option>`;
+                });
+                html += '</select></div>';
+            } else {
+                // Буровые — выбор ресурса и богатства
+                const rawItems = Object.values(CACHE.items).filter(i => i.is_raw && !i.is_liquid);
+                html += '<div class="mb-2"><label class="form-label small">Добываемый ресурс</label><select class="form-select form-select-sm" id="bld-resource" onchange="updateExtractorPreview()"><option value="">— Выберите ресурс —</option>';
+                rawItems.forEach(item => {
+                    html += `<option value="${item.id}" ${building.resourceItem?.id===item.id?'selected':''}>${item.name}</option>`;
+                });
+                html += '</select></div>';
+                html += '<div class="mb-2"><label class="form-label small">Богатство жилы</label><select class="form-select form-select-sm" id="bld-purity" onchange="updateExtractorPreview()">';
+                [{v:0.5,l:'Бедное'},{v:1.0,l:'Нормальное'},{v:2.0,l:'Богатое'}].forEach(p => {
+                    html += `<option value="${p.v}" ${(building.resourcePurity||1.0)===p.v?'selected':''}>${p.l}</option>`;
+                });
+                html += '</select></div>';
+            }
+        }
+
+        if (isExternalInput) {
+            // External input settings
+            const item = building.externalInput?.item;
+            html += `<h6>Внешний ввод #${building.id}</h6>`;
+            html += `<p class="small">Ресурс: ${itemIconHtml(item, 24)} ${item?.name || '?'}</p>`;
+            html += `<div class="mb-2"><label class="form-label small">Объём (ед/мин)</label>`;
+            html += `<input type="number" class="form-control form-control-sm" id="ext-rate" value="${building.externalInput?.rate || 30}" min="0" step="1"></div>`;
+            html += `<button class="btn btn-primary btn-sm w-100" onclick="applyExternalInputSettings(${building.id})">Применить</button>`;
+            html += `<button class="btn btn-outline-danger btn-sm w-100 mt-1" onclick="deleteBuilding(${building.id})">🗑️ Удалить</button>`;
+            showModal('Настройка внешнего ввода', html);
+            return;
+    }
+
+        if (recipes.length > 0) {
+            html += '<div class="mb-2"><label class="form-label small">Рецепт</label><select class="form-select form-select-sm" id="bld-recipe" onchange="updateRecipePreview()"><option value="">— Без рецепта —</option>';
+            recipes.forEach(r => {
+                html += `<option value="${r.id}" ${building.recipe?.id===r.id?'selected':''}>${r.name}</option>`;
+            });
+            html += '</select></div>';
+        }
+
+        const ocPct = Math.round(building.overclock * 100);
+        const ocHandler = isExtractor ? 'updateExtractorPreview()' : 'updateRecipePreview()';
+        html += `<div class="mb-2"><label class="form-label small">Разгон: <strong id="oc-val">${ocPct}</strong>%</label><input type="range" class="form-range" min="0" max="250" value="${ocPct}" id="bld-overclock" oninput="document.getElementById('oc-val').textContent=this.value; ${ocHandler}"></div>`;
+
+        if (recipes.length > 0) {
+            html += `<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="bld-somersloop" ${building.somersloop?'checked':''} onchange="updateRecipePreview()"><label class="form-check-label small" for="bld-somersloop">Петлевик (×2 выход, ×4 энергия)</label></div>`;
+        }
+
+        html += `<div id="recipe-preview" class="border rounded p-2 mb-2 small" style="background:#fafafa;"></div>`;
+        html += `<button class="btn btn-primary btn-sm w-100" onclick="applyBuildingSettings(${building.id})">Применить</button><button class="btn btn-outline-danger btn-sm w-100 mt-1" onclick="deleteBuilding(${building.id})">🗑️ Удалить</button>`;
+
+        showModal('Настройка здания', html);
+        setTimeout(() => {
+            if (isExtractor) updateExtractorPreview();
+            else if (recipes.length > 0) updateRecipePreview();
+        }, 100);
+    }
+
+    function updateRecipePreview() {
+        const container = document.getElementById('recipe-preview'); if (!container) return;
+        const recipeId = parseInt(document.getElementById('bld-recipe')?.value || 0);
+        const recipe = recipeId ? CACHE.recipes[recipeId] : null;
+        const overclock = parseInt(document.getElementById('bld-overclock')?.value || 100) / 100;
+        const somersloop = document.getElementById('bld-somersloop')?.checked || false;
+        if (!recipe) { container.innerHTML = '<span class="text-muted">Рецепт не выбран</span>'; return; }
+        const building = CACHE.buildings[recipe.building_id];
+        let basePower = building ? Math.abs(building.base_power) : 0;
+        if (recipe.max_power && recipe.max_power > 0) basePower = recipe.max_power;
+        let html = '<div class="fw-bold mb-1">' + recipe.name + '</div>';
+        html += '<div class="text-muted small mb-1">Вход:</div>';
+        recipe.inputs.forEach(inp => { const base = inp.per_minute, adj = base * overclock; html += `<div class="d-flex align-items-center gap-1 mb-1">${itemIconHtml(inp,18)} ${inp.name}: <strong>${adj.toFixed(1)}/мин</strong>${Math.abs(overclock-1)>0.001?` <span class="text-muted">(${base.toFixed(1)})</span>`:''}</div>`; });
+        html += '<div class="text-muted small mb-1 mt-2">Выход:</div>';
+        recipe.outputs.forEach(out => { const base = out.per_minute; let adj = base * overclock; if (somersloop) adj *= 2; html += `<div class="d-flex align-items-center gap-1 mb-1">${itemIconHtml(out,18)} ${out.name}: <strong>${adj.toFixed(1)}/мин</strong>${(Math.abs(overclock-1)>0.001||somersloop)?` <span class="text-muted">(${base.toFixed(1)})</span>`:''}</div>`; });
+        let power = basePower * Math.pow(overclock, 1.321928); if (somersloop) power *= 4;
+        html += `<div class="mt-2 text-muted small">⚡ Энергия: <strong>${power.toFixed(1)} МВт</strong>${(Math.abs(overclock-1)>0.001||somersloop)?` <span class="text-muted">(${basePower.toFixed(1)})</span>`:''}</div>`;
+        container.innerHTML = html;
+    }
+    function updateExtractorPreview() {
+        const container = document.getElementById('recipe-preview'); if (!container) return;
+        const itemId = parseInt(document.getElementById('bld-resource')?.value || 0);
+        const item = itemId ? CACHE.items[itemId] : null;
+        if (!item) { container.innerHTML = '<span class="text-muted">Ресурс не выбран</span>'; return; }
+        const overclock = parseInt(document.getElementById('bld-overclock')?.value || 100) / 100;
+        const purity = parseFloat(document.getElementById('bld-purity')?.value || 1.0);
+        const baseRate = item.extraction_rate || 30;
+        const labels = {0.5:'Бедное',1.0:'Нормальное',2.0:'Богатое'};
+        const mult = purity===0.5?1:purity===1.0?2:4;
+        const origRate = baseRate * mult, adjRate = origRate * overclock;
+        const extId = parseInt(document.getElementById('bld-extractor-id')?.value || 0);
+        const extB = CACHE.buildings[extId]; const basePower = extB ? Math.abs(extB.base_power) : 0;
+        const power = basePower * Math.pow(overclock, 1.321928);
+        let html = `<div class="fw-bold mb-1">${item.name}</div><div class="d-flex align-items-center gap-1 mb-2">${itemIconHtml(item,24)} ${item.name}</div>`;
+        html += `<div><span class="text-muted small">Богатство:</span> ${labels[purity]}</div>`;
+        html += `<div><span class="text-muted small">Добыча:</span> <strong>${adjRate.toFixed(1)}/мин</strong>${Math.abs(overclock-1)>0.001?` <span class="text-muted">(${origRate.toFixed(1)})</span>`:''}</div>`;
+        html += `<div class="mt-2 text-muted small">⚡ Энергия: <strong>${power.toFixed(1)} МВт</strong>${Math.abs(overclock-1)>0.001?` <span class="text-muted">(${basePower.toFixed(1)})</span>`:''}</div>`;
+        container.innerHTML = html;
+    }
+    function applyBuildingSettings(buildingId) {
+        saveUndoState()
+        const b = LINE_STATE.buildings.find(x => x.id === buildingId); if (!b) return;
+        const rs = document.getElementById('bld-recipe'); if (rs) { const rid = parseInt(rs.value||0); b.recipe = rid ? CACHE.recipes[rid] : null; }
+        const rsrc = document.getElementById('bld-resource'); if (rsrc) { const iid = parseInt(rsrc.value||0); b.resourceItem = iid ? CACHE.items[iid] : null; }
+        const ps = document.getElementById('bld-purity'); if (ps) b.resourcePurity = parseFloat(ps.value);
+        b.overclock = parseInt(document.getElementById('bld-overclock')?.value || 100) / 100;
+        b.somersloop = document.getElementById('bld-somersloop')?.checked || false;
+        hideModal(); recalculateLine(); drawAll(); saveToLocalStorage();
+    }
+    function applyExternalInputSettings(buildingId) {
+        saveUndoState()
+        const building = LINE_STATE.buildings.find(b => b.id === buildingId);
+        if (!building) return;
+
+        building.externalInput.rate = parseFloat(document.getElementById('ext-rate')?.value || 30);
+        hideModal(); recalculateLine(); drawAll(); saveToLocalStorage()
+    }
+    function deleteBuilding(buildingId) {
+        saveUndoState()
+        LINE_STATE.buildings = LINE_STATE.buildings.filter(b => b.id !== buildingId);
+        LINE_STATE.connections = LINE_STATE.connections.filter(c => c.from !== buildingId && c.to !== buildingId);
+        delete calcResults[buildingId];
+        if (LINE_STATE.buildings.length === 0) {
+            LINE_STATE.nextId = 1;
+        } else {
+            const maxId = Math.max(...LINE_STATE.buildings.map(b => b.id));
+            if (buildingId >= maxId) {
+                LINE_STATE.nextId = maxId + 1;
+            }
+        }
+        hideModal(); recalculateLine(); drawAll(); saveToLocalStorage();
+    }
+
+        // ---- CALCULATION ----
+        async function recalculateLine() {
+        if (LINE_STATE.buildings.length === 0) { updateUI(); return; }
+        try {
+            const payload = {
+                buildings: LINE_STATE.buildings,
+                connections: LINE_STATE.connections,
+                items_cache: CACHE.items,
+                buildings_cache: CACHE.buildings,
+                recipes_cache: CACHE.recipes,
+            };
+            const body = JSON.stringify(payload);
+            console.log('Payload body length:', body.length);
+            console.log('Has items_cache:', body.includes('items_cache'));
+            console.log('Has Уголь:', body.includes('Уголь'));
+
+            const resp = await fetch('/api/calculate/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+                body: body
+            });
+            const data = await resp.json();
+            if (data.success) {
+                calcResults = {};
+                data.buildings.forEach(r => { calcResults[r.id] = r; });
+                updateOutputsPanel(data.outputs);
+                document.getElementById('consumption-value').textContent = data.total_consumption.toFixed(0) + ' МВт';
+                const bal = data.net_balance;
+                const balEl = document.getElementById('balance-value');
+                balEl.textContent = (bal >= 0 ? '+' : '') + bal.toFixed(0) + ' МВт';
+                balEl.className = bal >= 0 ? 'text-success' : 'text-danger';
+            }
+        } catch(e) { console.error('Calculation error:', e); }
+        updateUI(); drawAll();
+    }
+    function updateOutputsPanel(outputs) {
+        const container = document.getElementById('outputs-container');
+        if (!outputs || Object.keys(outputs).length === 0) { container.innerHTML = '<p class="text-muted small">Добавьте Приёмник для отображения итогов</p>'; return; }
+        let html = '';
+        for (const [name, rate] of Object.entries(outputs)) {
+            const item = Object.values(CACHE.items).find(i => i.name === name);
+            html += `<div class="d-flex align-items-center gap-1 small mb-1">${item?itemIconHtml(item,18):`<span class="placeholder-icon small">${name[0]}</span>`}<span>${name}:</span><strong>${rate.toFixed(1)}/мин</strong></div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    // ---- UI ----
+    function toggleCosts() { const block = document.getElementById('costs-block'); block.classList.toggle('d-none'); block.previousElementSibling.textContent = block.classList.contains('d-none') ? '📋 Показать стоимость' : '📋 Скрыть стоимость'; }
+    function updateCosts() {
+        const totalCosts = {}, itemIcons = {};
+        LINE_STATE.buildings.forEach(b => { if (b.type?.costs) b.type.costs.forEach(c => { totalCosts[c.item_name] = (totalCosts[c.item_name]||0) + c.amount; if (!itemIcons[c.item_name] && c.icon_url) itemIcons[c.item_name] = c.icon_url; }); });
+        let html = ''; if (Object.keys(totalCosts).length > 0) { for (const [name, amount] of Object.entries(totalCosts)) { const ih = itemIcons[name] ? `<img src="${itemIcons[name]}" width="18" height="18" style="object-fit:contain;">` : `<span class="placeholder-icon small">${name[0]}</span>`; html += `<div class="d-flex align-items-center gap-1 small mb-1">${ih}<span class="flex-grow-1">${name}</span><strong>×${amount}</strong></div>`; } }
+        document.getElementById('costs-content').innerHTML = html || '<p class="text-muted small">Нет данных о стоимости</p>';
+    }
+    function updateUI() { document.getElementById('buildings-value').textContent = LINE_STATE.buildings.length; document.getElementById('build-hint').style.display = LINE_STATE.buildings.length > 0 ? 'none' : ''; updateCosts(); }
+
+    // ---- DRAWING ----
+    function drawAll() {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        ctx.fillStyle = isDark ? '#1a1a2e' : '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(camera.x, camera.y);
+        ctx.scale(zoom, zoom);
+        drawGrid(); drawBuildings(); drawConnections(); drawConnectingLine(); drawPlacingGhost();
+        if (selectingMode) {
+            const minX = Math.min(selectStart.x, selectEnd.x);
+            const maxX = Math.max(selectStart.x, selectEnd.x);
+            const minY = Math.min(selectStart.y, selectEnd.y);
+            const maxY = Math.max(selectStart.y, selectEnd.y);
+            ctx.strokeStyle = '#4d6bfe';
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([4 / zoom, 4 / zoom]);
+            ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+            ctx.setLineDash([]);
+        }
+        ctx.restore();
+    }
+    function drawGrid() {
+        const gs = GRID_SIZE;
+        ctx.strokeStyle = '#eee';
+        ctx.lineWidth = 1/zoom;
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        ctx.strokeStyle = isDark ? '#333' : '#eee';
+        ctx.lineWidth = 1/zoom;
+        const sx = Math.floor(-camera.x/zoom/gs)*gs, sy = Math.floor(-camera.y/zoom/gs)*gs;
+        const ex = sx + canvas.width/zoom + gs, ey = sy + canvas.height/zoom + gs;
+        for (let x = sx; x < ex; x += gs) {
+            ctx.beginPath(); ctx.moveTo(x, sy); ctx.lineTo(x, ey); ctx.stroke();
+        }
+        for (let y = sy; y < ey; y += gs) {
+            ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(ex, y); ctx.stroke();
+        }
+    }
+    function drawBuildings() {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        LINE_STATE.buildings.forEach(b => {
+            const cx = b.x * GRID_SIZE + GRID_SIZE / 2, cy = b.y * GRID_SIZE + GRID_SIZE / 2, r = GRID_SIZE / 2 - 4;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = b.type?.category_key === 'energy' ? '#fff8e1' : b.type?.id === -1 ? '#e8f5e9' : '#f0f4ff';
+            ctx.fill();
+            ctx.strokeStyle = '#4d6bfe';
+            ctx.lineWidth = 2 / zoom;
+            if (selectedBuildings.has(b.id)) {
+                ctx.strokeStyle = '#ff9800';
+                ctx.lineWidth = 3 / zoom;
+            } else {
+                ctx.strokeStyle = '#4d6bfe';
+                ctx.lineWidth = 2 / zoom;
+            }
+            ctx.stroke();
+
+            const iconUrl = b.externalInput ? b.externalInput.item?.icon_url : b.type?.icon_url;
+            if (iconUrl) {
+                if (!IMG_CACHE[iconUrl]) preloadImage(iconUrl);
+                const img = IMG_CACHE[iconUrl];
+                if (img && img.complete) ctx.drawImage(img, cx - r * 0.65, cy - r * 0.65, r * 1.3, r * 1.3);
+            }
+
+            // Building name
+            let label = b.type?.name?.substring(0, 15) || '?';
+            if (b.externalInput) label = b.externalInput.item?.name?.substring(0, 15) || 'Ввод';
+            if (b.resourceItem) label = b.resourceItem.name?.substring(0, 15) || '?';
+            if (b.recipe) label = b.recipe.name?.substring(0, 15) || label;
+            ctx.fillStyle = isDark ? '#ddd' : '#000';
+            ctx.font = `${10 / zoom}px system-ui`;
+            ctx.textAlign = 'center';
+            ctx.fillText(label, cx, cy + r + 10 / zoom);
+
+            // Calculation results
+            const cr = calcResults[b.id];
+            if (cr) {
+                let lines = [];
+
+                // Power line for generators
+                if (cr.power < 0) {
+                    lines.push('⚡' + Math.abs(cr.power).toFixed(0) + ' МВт');
+                }
+
+                // Output items
+                const outNames = Object.keys(cr.outputs);
+                if (outNames.length > 0) {
+                    lines.push(outNames.map(n => n.substring(0, 10)).join(',') + ' ' + outNames.map(n => cr.outputs[n].toFixed(1)).join(',') + '/мин');
+                } else if (b.type?.category_key === 'extraction') {
+                    const vals = Object.values(cr.outputs);
+                    if (vals.length > 0) lines.push(vals[0].toFixed(1) + '/мин');
+                }
+
+                let yOffset = cy + r + 20 / zoom;
+                for (const line of lines) {
+                    ctx.fillStyle = isDark ? '#7b9cff' : '#1e3a8a';
+                    ctx.font = `bold ${9 / zoom}px system-ui`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(line, cx, yOffset);
+                    yOffset += 10 / zoom;
+                }
+
+                if (cr.efficiency < 0.999 && cr.efficiency > 0) {
+                    ctx.fillStyle = isDark ? '#ff6666' : '#c94343';
+                    ctx.font = `${8 / zoom}px system-ui`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('⏳' + (cr.efficiency * 100).toFixed(0) + '%', cx, yOffset);
+                    yOffset += 10 / zoom;
+                }
+            }
+
+            // Building ID
+            ctx.fillStyle = '#aaa';
+            ctx.font = `${7 / zoom}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText('#' + b.id, cx, cy + r + 38 / zoom);
+        });
+    }
+    function drawConnections() {
+        const colors = { belt: {1:'#888',2:'#e8943a',3:'#4a90d9',4:'#c94343',5:'#5bc0eb'}, pipe: {1:'#555',2:'#999'} };
+        LINE_STATE.connections.forEach(conn => {
+            const from = LINE_STATE.buildings.find(b => b.id === conn.from), to = LINE_STATE.buildings.find(b => b.id === conn.to);
+            if (!from || !to) return;
+            const x1=from.x*GRID_SIZE+GRID_SIZE/2, y1=from.y*GRID_SIZE+GRID_SIZE/2, x2=to.x*GRID_SIZE+GRID_SIZE/2, y2=to.y*GRID_SIZE+GRID_SIZE/2;
+            ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
+            ctx.strokeStyle = (colors[conn.type]||{})[conn.level]||'#888'; ctx.lineWidth = conn.type==='pipe'?3/zoom:2/zoom; ctx.stroke();
+            const angle = Math.atan2(y2-y1,x2-x1), al = 8/zoom, ax = x2-Math.cos(angle)*(GRID_SIZE/2-2), ay = y2-Math.sin(angle)*(GRID_SIZE/2-2);
+            ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ax-al*Math.cos(angle-0.5), ay-al*Math.sin(angle-0.5)); ctx.lineTo(ax-al*Math.cos(angle+0.5), ay-al*Math.sin(angle+0.5)); ctx.closePath(); ctx.fillStyle=ctx.strokeStyle; ctx.fill();
+        });
+    }
+    function drawConnectingLine() { if(!connectingMode)return; const from=LINE_STATE.buildings.find(b=>b.id===connectingMode.fromBuildingId); if(!from)return; ctx.save(); ctx.translate(camera.x,camera.y); ctx.scale(zoom,zoom); ctx.beginPath(); ctx.moveTo(from.x*GRID_SIZE+GRID_SIZE/2,from.y*GRID_SIZE+GRID_SIZE/2); ctx.lineTo(mouseWorld.x,mouseWorld.y); ctx.strokeStyle='#4d6bfe'; ctx.lineWidth=2/zoom; ctx.setLineDash([6/zoom,4/zoom]); ctx.stroke(); ctx.setLineDash([]); ctx.restore(); }
+    function drawPlacingGhost() {
+        if(!LINE_STATE.placingMode)return;
+        const cx=mouseGrid.x*GRID_SIZE+GRID_SIZE/2, cy=mouseGrid.y*GRID_SIZE+GRID_SIZE/2, r=GRID_SIZE/2-4;
+        ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle='#4d6bfe'; ctx.fill();
+        ctx.strokeStyle='#1e3a8a'; ctx.lineWidth=2/zoom; ctx.setLineDash([4/zoom,4/zoom]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1.0;
+        const mode=LINE_STATE.placingMode; let iconUrl=null;
+        if(mode.type==='building')iconUrl=CACHE.buildings[mode.buildingId]?.icon_url; else if(mode.type==='externalInput')iconUrl=CACHE.items[mode.itemId]?.icon_url; else if(mode.type==='extractor')iconUrl=CACHE.buildings[mode.buildingId]?.icon_url;
+        if(iconUrl){if(!IMG_CACHE[iconUrl])preloadImage(iconUrl);const img=IMG_CACHE[iconUrl];if(img&&img.complete){ctx.globalAlpha=0.6;ctx.drawImage(img,cx-r*0.6,cy-r*0.6,r*1.2,r*1.2);ctx.globalAlpha=1.0;}}
+    }
+
+    // ---- MODAL ----
+    function showModal(title, bodyHtml) { document.getElementById('main-modal-content').innerHTML = `<div class="modal-header"><h5 class="modal-title">${title}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">${bodyHtml}</div>`; new bootstrap.Modal(document.getElementById('main-modal')).show(); }
+    function hideModal() { const m = bootstrap.Modal.getInstance(document.getElementById('main-modal')); if (m) m.hide(); }
+    function itemIconHtml(item, size = 36) { if (item.icon_url) return `<img src="${item.icon_url}" width="${size}" height="${size}" alt="${item.name}">`; const cls = item.is_liquid ? 'placeholder-icon liquid' : 'placeholder-icon'; return `<div class="${cls}" style="width:${size}px;height:${size}px;font-size:${size*0.4}px;">${item.name[0]}</div>`; }
+
+    // ---- TABS ----
+    document.querySelectorAll('#panel-tabs .tab-link').forEach(tab => { tab.addEventListener('click', function() { document.querySelectorAll('#panel-tabs .tab-link').forEach(t => t.classList.remove('active')); this.classList.add('active'); loadTabContent(this.dataset.tab); }); });
+    document.getElementById('btn-new').addEventListener('click', function() {
+        if (LINE_STATE.buildings.length > 0 && !confirm('Сбросить текущую линию? Несохранённые изменения пропадут.')) {
+            return;
+        }
+        LINE_STATE.buildings = [];
+        LINE_STATE.connections = [];
+        LINE_STATE.nextId = 1;
+        calcResults = {};
+        selectedBuildings.clear();
+        localStorage.removeItem('satisfactory-line');
+        document.getElementById('outputs-container').innerHTML = '<p class="text-muted small">Добавьте Приёмник для отображения итогов</p>';
+        document.getElementById('consumption-value').textContent = '0 МВт';
+        document.getElementById('balance-value').textContent = '0 МВт';
+        document.getElementById('balance-value').className = 'text-success';
+        document.getElementById('buildings-value').textContent = '0';
+        document.getElementById('costs-content').innerHTML = '<p class="text-muted small">Нет данных</p>';
+        updateUI();
+        drawAll();
+        document.getElementById('build-hint').style.display = '';
+    });
+    document.getElementById('panel-search').addEventListener('input', function() { const active = document.querySelector('#panel-tabs .tab-link.active'); if (active) loadTabContent(active.dataset.tab); });
+    async function loadTabContent(tabName) { const container = document.getElementById('tab-content'); const search = document.getElementById('panel-search').value.toLowerCase(); switch(tabName) { case 'resources': container.innerHTML = await loadResourcesTab(search); break; case 'recipes': container.innerHTML = await loadRecipesTab(search); break; case 'structures': container.innerHTML = await loadStructuresTab(search); break; } }
+    async function loadResourcesTab(search) { const items=Object.values(CACHE.items); const produced=items.filter(i=>!i.is_raw&&(!search||i.name.toLowerCase().includes(search))); const raw=items.filter(i=>i.is_raw&&(!search||i.name.toLowerCase().includes(search))); let html=''; if(raw.length){html+='<div class="section-title">Сырьё (месторождения)</div><div class="d-flex flex-wrap gap-1">';raw.forEach(item=>html+=`<div class="resource-card" onclick="onResourceClick(${item.id})" title="${item.name}">${itemIconHtml(item)}<span class="card-label">${item.name.substring(0,12)}</span></div>`);html+='</div>';} html+='<div class="section-title">Производство</div><div class="d-flex flex-wrap gap-1">';produced.forEach(item=>html+=`<div class="resource-card" onclick="onResourceClick(${item.id})" title="${item.name}">${itemIconHtml(item)}<span class="card-label">${item.name.substring(0,12)}</span></div>`);html+='</div>'; return html||'<p class="text-muted text-center mt-3">Ничего не найдено</p>'; }
+    async function loadRecipesTab(search) { let recipes=Object.values(CACHE.recipes); if(search)recipes=recipes.filter(r=>r.name.toLowerCase().includes(search)); let html='';recipes.forEach(r=>html+=`<div class="recipe-card" onclick="enterPlacingMode({type:'building',buildingId:${r.building_id},recipeId:${r.id}})"><strong>${r.name}</strong><div class="d-flex align-items-center gap-1 mt-1 ingredients">${r.inputs.map(i=>itemIconHtml(i,22)).join('')}<span class="mx-1">→</span>${r.outputs.map(o=>itemIconHtml(o,22)).join('')}</div><small class="text-muted">${r.building_name||'?'} · ${r.outputs[0]?.per_minute||'?'}/мин</small></div>`); return html||'<p class="text-muted text-center mt-3">Ничего не найдено</p>'; }
+    async function loadStructuresTab(search) { const buildings=Object.values(CACHE.buildings); const categories={}; buildings.forEach(b=>{if(!categories[b.category])categories[b.category]=[];if(!search||b.name.toLowerCase().includes(search))categories[b.category].push(b);}); let html=''; for(const[cat,items]of Object.entries(categories)){if(!items.length)continue;html+=`<div class="section-title">${cat}</div><div class="d-flex flex-wrap gap-1">`;items.forEach(b=>html+=`<div class="structure-card" onclick="enterPlacingMode({type:'building',buildingId:${b.id}})" title="${b.name}">${b.icon_url?`<img src="${b.icon_url}" width="36" height="36" alt="${b.name}">`:`<div class="placeholder-icon" style="width:36px;height:36px;font-size:14px;">${b.name[0]}</div>`}<span class="card-label">${b.name.substring(0,10)}</span></div>`);html+='</div>';} return html||'<p class="text-muted text-center mt-3">Ничего не найдено</p>'; }
+
+    async function onResourceClick(itemId) {
+        const item=CACHE.items[itemId];
+        if(!item)
+            return;
+        let html=`<p>Выберите действие для: <strong>${item.name}</strong></p>`;
+        try{
+            const resp=await fetch(`/api/recipes/${itemId}/`);
+            const data=await resp.json();
+            if(data.recipes.length>0){
+                html+='<div class="section-title">Производить</div>';
+                data.recipes.forEach(r=>html+=`<div class="recipe-card" onclick="selectRecipeFromModal(${r.building_id},${r.id})"><strong>${r.name}</strong><div class="d-flex align-items-center gap-1 mt-1 ingredients">${r.inputs.map(i=>itemIconHtml(i,22)).join('')}<span class="mx-1">→</span>${r.outputs.map(o=>itemIconHtml(o,22)).join('')}</div><small class="text-muted">${r.building} · ${r.outputs[0]?.per_minute||'?'}/мин</small></div>`);
+            }
+        }catch(e){}
+        if(item.is_raw){html+='<div class="section-title mt-2">Добыча</div>';
+            const extractors=Object.values(CACHE.buildings).filter(b=>{
+                if(b.category_key!=='extraction')
+                    return false;
+                if(item.is_liquid){
+                    if(item.name==='Вода')
+                        return b.name==='Экстрактор воды';
+                    if(item.name==='Сырая нефть')
+                        return b.name==='Экстрактор нефти';
+                    return false;
+                }
+                else{
+                    return b.name.includes('Буровая');
+                }
+            });
+            if(extractors.length>0){
+                extractors.forEach(b=>{
+                    const baseRate=item.extraction_rate||30;
+                    let mm=1.0;if(b.name.includes('ур. 2')||b.name.includes('Mk.2'))mm=2.0;if(b.name.includes('ур. 3')||b.name.includes('Mk.3'))mm=4.0;let rates;if(b.name==='Экстрактор воды'){rates=[{purity:2.0,label:'Фиксированная',rate:120.0}];}else if(b.name==='Экстрактор нефти'){const ob=item.extraction_rate||60;rates=[{purity:0.5,label:'Бедное',rate:ob*1.0},{purity:1.0,label:'Нормальное',rate:ob*2.0},{purity:2.0,label:'Богатое',rate:ob*4.0}];}else{rates=[{purity:0.5,label:'Бедное',rate:baseRate*1.0*mm},{purity:1.0,label:'Нормальное',rate:baseRate*2.0*mm},{purity:2.0,label:'Богатое',rate:baseRate*4.0*mm}];}html+=`<div class="recipe-card"><strong>${b.name}</strong><div class="d-flex flex-column gap-1 mt-1">`;rates.forEach(r=>html+=`<div class="d-flex justify-content-between align-items-center" onclick="selectExtractor(${b.id},${item.id},${r.purity})" style="cursor:pointer;padding:2px 4px;border-radius:4px;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''"><small>${r.label}</small><small class="text-muted">${r.rate}/мин</small></div>`);html+=`</div></div>`;});}else{html+='<p class="text-muted small">Нет доступных экстракторов</p>';}} if(!item.is_raw){html+='<div class="section-title mt-2">Внешний ввод (уже есть)</div>';html+=`<div class="d-flex align-items-center gap-2 mt-1"><input type="number" class="form-control form-control-sm" id="ext-rate" value="30" min="0" step="1" style="width:80px;"><span>ед/мин</span><button class="btn btn-sm btn-outline-primary" onclick="selectExternalInput(${item.id})">🔌 Подать извне</button></div>`;} showModal('Ресурс: '+item.name, html); }
+    function selectRecipeFromModal(buildingId, recipeId) { hideModal(); enterPlacingMode({ type: 'building', buildingId, recipeId }); }
+    function selectExternalInput(itemId) { const rate = parseFloat(document.getElementById('ext-rate')?.value || 30); hideModal(); enterPlacingMode({ type: 'externalInput', itemId, rate }); }
+    function selectExtractor(buildingId, itemId, purity) { const item = CACHE.items[itemId]; hideModal(); enterPlacingMode({ type: 'extractor', buildingId, resourceItem: { id: item.id, name: item.name, icon_url: item.icon_url, extraction_rate: item.extraction_rate }, purity }); }
+
+    // ---- INIT ----
+    async function preloadAllData() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const viewId = urlParams.get('view');
+        const editId = urlParams.get('edit');
+        const loadId = editId || viewId;
+        const isViewOnly = !!viewId;
+
+        if (loadId) {
+            try {
+                const resp = await fetch(`/api/line/${loadId}/`);
+                const data = await resp.json();
+                if (data.success) {
+                    LINE_STATE.buildings = data.buildings || [];
+                    LINE_STATE.connections = data.connections || [];
+                    LINE_STATE.nextId = data.nextId || 1;
+                    LINE_STATE.lineId = data.line_id;
+                    LINE_STATE.name = data.name;
+                    recalculateLine();
+                    drawAll();
+
+                    if (isViewOnly) {
+                        document.getElementById('view-actions').classList.remove('d-none');
+                        document.getElementById('build-hint').innerHTML = `
+                            <p class="fs-5">Режим просмотра</p>
+                            <p class="small">Автор: <a href="/profile/?user=${data.author_id}">${data.author}</a></p>
+                        `;
+                        // Like button
+                        const likeBtn = document.getElementById('btn-like-view');
+                        likeBtn.addEventListener('click', async () => {
+                            if (!CSRF_TOKEN) {
+                                window.location.href = '/accounts/login/';
+                                return;
+                            }
+                            const resp = await fetch(`/api/like/${loadId}/`, {
+                                method: 'POST',
+                                headers: { 'X-CSRFToken': CSRF_TOKEN },
+                            });
+                            const d = await resp.json();
+                            if (d.success) {
+                                likeBtn.textContent = (d.liked ? '❤️' : '🤍') + ' Нравится (' + d.count + ')';
+                            }
+                        });
+
+                        // Bookmark button
+                        const bmBtn = document.getElementById('btn-bookmark-view');
+                        bmBtn.addEventListener('click', async () => {
+                            if (!CSRF_TOKEN) {
+                                window.location.href = '/accounts/login/';
+                                return;
+                            }
+                            const resp = await fetch(`/api/bookmark/${loadId}/`, {
+                                method: 'POST',
+                                headers: { 'X-CSRFToken': CSRF_TOKEN },
+                            });
+                            const d = await resp.json();
+                            if (d.success) {
+                                bmBtn.textContent = (d.bookmarked ? '📌' : '🔖') + ' ' + (d.bookmarked ? 'В закладках' : 'В закладки');
+                            }
+                        });
+                        // Отключаем только размещение и клики, но не панорамирование
+                        document.getElementById('panel-tabs').style.display = 'none';
+                        document.getElementById('tab-content').style.display = 'none';
+                        document.getElementById('panel-search').style.display = 'none';
+                        document.getElementById('btn-save').style.display = 'none';
+                        document.getElementById('btn-new').style.display = 'none';
+                        document.getElementById('placing-indicator').style.display = 'none';
+                        document.getElementById('build-hint').innerHTML = '<p class="fs-5">Режим просмотра</p>';
+                        document.getElementById('build-hint').style.display = '';
+
+                        // Блокируем размещение и соединения, но оставляем панорамирование
+                        LINE_STATE.placingMode = null;
+                    }
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        try {
+            const [r1, r2, r3] = await Promise.all([
+                fetch('/api/items/'),
+                fetch('/api/buildings/'),
+                fetch('/api/recipes/')
+            ]);
+            (await r1.json()).items.forEach(i => CACHE.items[i.id] = i);
+            (await r2.json()).buildings.forEach(b => {
+                CACHE.buildings[b.id] = b;
+                if (b.icon_url) preloadImage(b.icon_url);
+            });
+            (await r3.json()).recipes.forEach(r => CACHE.recipes[r.id] = r);
+        } catch(e) { console.error(e); }
+
+        // Restore from localStorage only if not loading a saved line
+        if (!loadId && loadFromLocalStorage()) {
+            recalculateLine();
+            drawAll();
+        }
+
+        loadTabContent('resources');
+    }
+    preloadAllData();
+
+    const UNDO_STACK = [];
+    const MAX_UNDO = 50;
+
+    function saveUndoState() {
+        UNDO_STACK.push({
+            buildings: JSON.parse(JSON.stringify(LINE_STATE.buildings)),
+            connections: JSON.parse(JSON.stringify(LINE_STATE.connections)),
+            nextId: LINE_STATE.nextId,
+        });
+        if (UNDO_STACK.length > MAX_UNDO) UNDO_STACK.shift();
+    }
+
+    function undo() {
+        if (UNDO_STACK.length === 0)
+            return
+        const state = UNDO_STACK.pop()
+        LINE_STATE.buildings = state.buildings
+        LINE_STATE.connections = state.connections
+        LINE_STATE.nextId = state.nextId
+        calcResults = {}
+        recalculateLine(); drawAll(); saveToLocalStorage()
+    }
+
+    async function saveLine(publish = false) {
+        const name = LINE_STATE.name || 'Новая линия';
+        let html = `<div class="mb-2"><label class="form-label small">Название</label><input type="text" class="form-control form-control-sm" id="line-name" value="${name}"></div>`;
+        html += `<button class="btn btn-primary btn-sm w-100" onclick="doSave(${publish})">Сохранить</button>`;
+        showModal('Сохранение линии', html);
+    }
+
+    async function doSave(publish) {
+        const name = document.getElementById('line-name')?.value || 'Без названия';
+        LINE_STATE.name = name;
+
+        try {
+            const resp = await fetch('/api/save-line/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+                body: JSON.stringify({
+                    name: name,
+                    is_published: publish,
+                    buildings: LINE_STATE.buildings,
+                    connections: LINE_STATE.connections,
+                    line_id: LINE_STATE.lineId || null,
+                    total_buildings: LINE_STATE.buildings.length,
+                    total_power: parseFloat(document.getElementById('consumption-value')?.textContent) || 0,
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                LINE_STATE.lineId = data.line_id;
+                hideModal();
+                alert('Сохранено!');
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    function findConnectionAt(wx, wy) {
+        const threshold = 10; // pixels in world space
+        for (const conn of LINE_STATE.connections) {
+            const from = LINE_STATE.buildings.find(b => b.id === conn.from);
+            const to = LINE_STATE.buildings.find(b => b.id === conn.to);
+            if (!from || !to) continue;
+
+            const x1 = from.x * GRID_SIZE + GRID_SIZE / 2;
+            const y1 = from.y * GRID_SIZE + GRID_SIZE / 2;
+            const x2 = to.x * GRID_SIZE + GRID_SIZE / 2;
+            const y2 = to.y * GRID_SIZE + GRID_SIZE / 2;
+
+            // Distance from point to line segment
+            const dist = pointToSegmentDist(wx, wy, x1, y1, x2, y2);
+            if (dist < threshold) return conn;
+        }
+        return null;
+    }
+
+    function pointToSegmentDist(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1, dy = y2 - y1;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+        let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const nearX = x1 + t * dx, nearY = y1 + t * dy;
+        return Math.hypot(px - nearX, py - nearY);
+    }
+
+    function deleteConnection(connId) {
+        LINE_STATE.connections = LINE_STATE.connections.filter(c => c.id !== connId);
+        recalculateLine();
+        drawAll();
+    }
+
+</script>
+{% endblock %}

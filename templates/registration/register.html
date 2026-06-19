@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Регистрация{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-4">
+        <h3 class="mb-3">Регистрация</h3>
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="mb-2">
+                    {{ field.label_tag }}
+                    {{ field }}
+                    {% if field.errors %}
+                        <small class="text-danger">{{ field.errors|striptags }}</small>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <p class="small text-muted">Пароль должен содержать минимум 8 символов, буквы и цифры.</p>
+
+
+
+            <button type="submit" class="btn btn-primary w-100">Зарегистрироваться</button>
+        </form>
+        <p class="mt-2 text-center small">Уже есть аккаунт? <a href="{% url 'login' %}">Войти</a></p>
+    </div>
+</div>
+{% endblock %}

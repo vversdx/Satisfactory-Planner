@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Профиль — {{ profile_user.username }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-auto">
+        <div class="placeholder-icon" style="width:100px;height:100px;font-size:36px;border-radius:50%;">
+            {{ profile_user.username.0|upper }}
+        </div>
+    </div>
+    <div class="col">
+        <h3>{{ profile_user.username }}</h3>
+        <p class="text-muted">На сервисе с {{ profile_user.date_joined|date:"d.m.Y" }}</p>
+        {% if user == profile_user %}
+            <a href="{% url 'edit_profile' %}" class="btn btn-outline-secondary btn-sm">Редактировать профиль</a>
+            <button class="btn btn-outline-secondary btn-sm">Поделиться</button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-4">
+        <div class="card p-3 text-center">
+            <div class="stat-number fs-4">{{ published_count }}</div>
+            <small class="text-muted">Опубликовано</small>
+        </div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card p-3 text-center">
+            <div class="stat-number fs-4">{{ likes_received }}</div>
+            <small class="text-muted">Получено ❤️</small>
+        </div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card p-3 text-center">
+            <div class="stat-number fs-4">{{ bookmark_count }}</div>
+            <small class="text-muted">В избранном</small>
+        </div>
+    </div>
+</div>
+
+<h4 class="mb-3">Публичные линии</h4>
+<div class="row g-3">
+    {% for line in published_lines %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card p-3">
+            <h5 class="fw-semibold">{{ line.name }}</h5>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                {% for out in line.outputs.all %}
+                <span class="badge bg-light text-dark border d-flex align-items-center gap-1 small">
+                    {% if out.item.icon %}
+                        <img src="{{ out.item.icon.url }}" alt="" width="20" height="20">
+                    {% else %}
+                        <span class="placeholder-icon small {% if out.item.is_liquid %}liquid{% endif %}">{{ out.item.name.0 }}</span>
+                    {% endif %}
+                    {{ out.item.name }}: {{ out.rate|floatformat:1 }}/мин
+                </span>
+                {% endfor %}
+            </div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>🏭 {{ line.total_buildings }} зд.</span>
+                <span>⚡ {{ line.total_power }} МВт</span>
+                <span>❤️ {{ line.likes.count }}</span>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <p class="text-muted">Нет опубликованных линий.</p>
+    {% endfor %}
+</div>
+{% endblock %}

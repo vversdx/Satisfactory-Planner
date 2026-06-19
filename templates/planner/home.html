@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Главная — Satisfactory Planner{% endblock %}
+
+{% block content %}
+<div class="text-center mb-5">
+    <h2 class="fw-bold">Планировщик Satisfactory</h2>
+    <p class="text-muted">Проектируйте, оптимизируйте и делитесь производственными линиями.</p>
+    {% if user.is_authenticated %}
+        <a href="{% url 'build' %}" class="btn btn-primary btn-lg mt-2">➕ Создать новую линию</a>
+    {% else %}
+        <p class="text-muted mt-2"><a href="{% url 'login' %}">Войдите</a>, чтобы создавать свои линии.</p>
+    {% endif %}
+</div>
+
+<h4 class="mb-3">Последние опубликованные линии</h4>
+
+<div class="row g-3">
+    {% for line in lines %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card p-3">
+            <h5 class="fw-semibold">{{ line.name }}</h5>
+            <p class="text-muted small mb-2">Автор: <a href="{% url 'profile' %}?user={{ line.author.id }}">{{ line.author.username }}</a></p>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                {% for out in line.outputs.all %}
+                <span class="badge bg-light text-dark border d-flex align-items-center gap-1">
+                    {% if out.item.icon %}
+                        <img src="{{ out.item.icon.url }}" alt="" width="20" height="20">
+                    {% else %}
+                        <span class="placeholder-icon small {% if out.item.is_liquid %}liquid{% endif %}">{{ out.item.name.0 }}</span>
+                    {% endif %}
+                    {{ out.item.name }}: <span class="stat-number">{{ out.rate|floatformat:1 }}/мин</span>
+                </span>
+                {% empty %}
+                <span class="text-muted small">Нет данных</span>
+                {% endfor %}
+            </div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>🏭 {{ line.total_buildings }} зд.</span>
+                <span>⚡ {{ line.total_power }} МВт</span>
+                <span>❤️ {{ line.likes.count }}</span>
+            </div>
+            <div class="mt-2">
+                <a href="{% url 'build' %}?view={{ line.id }}" class="btn btn-sm btn-outline-primary">👁️ Просмотр</a>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <p class="text-muted">Пока нет опубликованных линий.</p>
+    {% endfor %}
+</div>
+
+{% if is_paginated %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if page_obj.has_previous %}
+            <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">←</a></li>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            <li class="page-item {% if num == page_obj.number %}active{% endif %}">
+                <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+            </li>
+        {% endfor %}
+        {% if page_obj.has_next %}
+            <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">→</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

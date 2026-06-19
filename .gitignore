@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+db.sqlite3
+.idea/
+.vscode/
+media/items/
+media/buildings/
+media/avatars/
+staticfiles/
+.env
+.DS_Store
+Thumbs.db
+*.log
+.pytest_cache/

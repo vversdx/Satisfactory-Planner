@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ line.name }} — Satisfactory Planner{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h2>{{ line.name }}</h2>
+        <p class="text-muted">Автор: {{ line.author.username }} · {{ line.created_at|date:"d.m.Y" }}</p>
+
+        <div class="card p-3 mb-3">
+            <h5>Итоговые ресурсы</h5>
+            <div class="d-flex flex-wrap gap-2">
+                {% for out in line.outputs.all %}
+                <span class="badge bg-light text-dark border d-flex align-items-center gap-1">
+                    {% if out.item.icon %}
+                        <img src="{{ out.item.icon.url }}" alt="" width="20" height="20">
+                    {% else %}
+                        <span class="placeholder-icon small {% if out.item.is_liquid %}liquid{% endif %}">{{ out.item.name.0 }}</span>
+                    {% endif %}
+                    {{ out.item.name }}: <strong>{{ out.rate|floatformat:1 }}/мин</strong>
+                </span>
+                {% empty %}
+                <span class="text-muted">Нет итоговых ресурсов</span>
+                {% endfor %}
+            </div>
+            <hr>
+            <div class="d-flex gap-3 text-muted small">
+                <span>⚡ Потребление: {{ line.total_power }} МВт</span>
+                <span>🏭 Зданий: {{ line.total_buildings }}</span>
+                <span>❤️ <span id="likes-count">{{ line.likes.count }}</span></span>
+            </div>
+        </div>
+
+        <div class="card p-3">
+            <h5>Схема линии</h5>
+            <div id="line-canvas" style="height: 400px; background: #f9f9f9; border-radius: 4px;">
+                <p class="text-center text-muted pt-5">Схема будет отображаться здесь</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card p-3">
+            {% if user.is_authenticated %}
+                {% if is_author %}
+                    <a href="{% url 'build' %}?edit={{ line.id }}" class="btn btn-outline-primary btn-sm w-100 mb-2">✏️ Редактировать</a>
+                {% else %}
+                    <button class="btn btn-sm w-100 mb-2 like-btn {% if is_liked %}btn-success{% else %}btn-outline-success{% endif %}" data-line-id="{{ line.id }}" id="like-btn">
+                        {% if is_liked %}❤️ Нравится{% else %}🤍 Нравится{% endif %} (<span id="likes-count-btn">{{ line.likes.count }}</span>)
+                    </button>
+                    <button class="btn btn-sm w-100 mb-2 bookmark-btn {% if is_bookmarked %}btn-warning{% else %}btn-outline-warning{% endif %}" data-line-id="{{ line.id }}" id="bookmark-btn">
+                        {% if is_bookmarked %}📌 В закладках{% else %}🔖 В закладки{% endif %}
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm w-100">📋 Копировать к себе</button>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const CSRF_TOKEN = getCookie('csrftoken');
+
+    // Like button
+    document.getElementById('like-btn')?.addEventListener('click', async function() {
+        const lineId = this.dataset.lineId;
+        const resp = await fetch(`/api/like/${lineId}/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
+        });
+        const data = await resp.json();
+        if (data.success) {
+            this.classList.toggle('btn-outline-success', !data.liked);
+            this.classList.toggle('btn-success', data.liked);
+            this.innerHTML = (data.liked ? '❤️ Нравится' : '🤍 Нравится') + ` (${data.count})`;
+            document.getElementById('likes-count').textContent = data.count;
+        }
+    });
+
+    // Bookmark button
+    document.getElementById('bookmark-btn')?.addEventListener('click', async function() {
+        const lineId = this.dataset.lineId;
+        const resp = await fetch(`/api/bookmark/${lineId}/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
+        });
+        const data = await resp.json();
+        if (data.success) {
+            this.classList.toggle('btn-outline-warning', !data.bookmarked);
+            this.classList.toggle('btn-warning', data.bookmarked);
+            this.textContent = data.bookmarked ? '📌 В закладках' : '🔖 В закладки';
+        }
+    });
+</script>
+{% endblock %}

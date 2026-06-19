@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Мои цепочки — Satisfactory Planner{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">Мои цепочки</h2>
+
+<ul class="nav nav-tabs mb-3" id="myLinesTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="created-tab" data-bs-toggle="tab" data-bs-target="#created" type="button">Созданные</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="saved-tab" data-bs-toggle="tab" data-bs-target="#saved" type="button">Сохранённые</button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="created">
+        {% if own_lines %}
+        <div class="row g-3">
+            {% for line in own_lines %}
+            <div class="col-md-6 col-lg-4">
+                <div class="card p-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <h5 class="fw-semibold">{{ line.name }}</h5>
+                        {% if line.is_published %}
+                            <span class="badge bg-success small">Опубликовано</span>
+                        {% else %}
+                            <span class="badge bg-secondary small">Черновик</span>
+                        {% endif %}
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        {% for out in line.outputs.all %}
+                        <span class="badge bg-light text-dark border d-flex align-items-center gap-1 small">
+                            {% if out.item.icon %}
+                                <img src="{{ out.item.icon.url }}" alt="" width="20" height="20">
+                            {% else %}
+                                <span class="placeholder-icon small {% if out.item.is_liquid %}liquid{% endif %}">{{ out.item.name.0 }}</span>
+                            {% endif %}
+                            {{ out.item.name }}: {{ out.rate|floatformat:1 }}/мин
+                        </span>
+                        {% empty %}
+                        <span class="text-muted small">Нет данных</span>
+                        {% endfor %}
+                    </div>
+                    <div class="d-flex justify-content-between text-muted small mb-2">
+                        <span>🏭 {{ line.total_buildings }} зд.</span>
+                        <span>⚡ {{ line.total_power }} МВт</span>
+                        <span>❤️ {{ line.likes.count }}</span>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="{% url 'build' %}?edit={{ line.id }}" class="btn btn-sm btn-outline-secondary">✏️</a>
+                        <form method="post" action="{% url 'toggle_publish' line.id %}" class="d-inline">
+                            {% csrf_token %}
+                            {% if line.is_published %}
+                                <button type="submit" class="btn btn-sm btn-warning">📢 Снять</button>
+                            {% else %}
+                                <button type="submit" class="btn btn-sm btn-outline-success">📢 Опубликовать</button>
+                            {% endif %}
+                        </form>
+                        <form method="post" action="{% url 'delete_line' line.id %}" class="d-inline" onsubmit="return confirm('Удалить линию «{{ line.name }}»?')">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
+                        </form>
+                        <a href="{% url 'build' %}?view={{ line.id }}" class="btn btn-sm btn-outline-primary">👁️</a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <p class="text-muted">Вы ещё не создали ни одной линии.</p>
+            <a href="{% url 'build' %}" class="btn btn-primary">➕ Создать первую линию</a>
+        </div>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade" id="saved">
+        {% if bookmarked_lines %}
+        <div class="row g-3">
+            {% for line in bookmarked_lines %}
+            <div class="col-md-6 col-lg-4">
+                <div class="card p-3">
+                    <h5 class="fw-semibold">{{ line.name }}</h5>
+                    <p class="text-muted small">Автор: {{ line.author.username }}</p>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        {% for out in line.outputs.all %}
+                        <span class="badge bg-light text-dark border d-flex align-items-center gap-1 small">
+                            {% if out.item.icon %}
+                                <img src="{{ out.item.icon.url }}" alt="" width="20" height="20">
+                            {% else %}
+                                <span class="placeholder-icon small {% if out.item.is_liquid %}liquid{% endif %}">{{ out.item.name.0 }}</span>
+                            {% endif %}
+                            {{ out.item.name }}: {{ out.rate|floatformat:1 }}/мин
+                        </span>
+                        {% endfor %}
+                    </div>
+                    <div class="d-flex justify-content-between text-muted small mb-2">
+                        <span>🏭 {{ line.total_buildings }} зд.</span>
+                        <span>⚡ {{ line.total_power }} МВт</span>
+                        <span>❤️ {{ line.likes.count }}</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <a href="{% url 'build' %}?view={{ line.id }}" class="btn btn-sm btn-outline-primary">👁️ Просмотр</a>
+                        <form method="post" action="{% url 'delete_bookmark' line.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger">🔖 Убрать</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">Нет сохранённых линий. <a href="{% url 'home' %}">Найти на главной</a></p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
