@@ -88,7 +88,7 @@ satisfactory-planner/
 
 ### 1. Клонируйте репозиторий
 ```bash
-git clone https://github.com/vversdx/satisfactory-planner.git
+git clone https://github.com/vversdx/Satisfactory-Planner
 cd satisfactory-planner
 ```
 
