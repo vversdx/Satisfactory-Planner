@@ -1,10 +1,3 @@
-"""
-Core production line calculator.
-
-Calculates resource flows, power consumption, and efficiency
-for a placed production line using topological sorting and
-iterative demand propagation.
-"""
 from collections import defaultdict
 from dataclasses import dataclass, field
 
