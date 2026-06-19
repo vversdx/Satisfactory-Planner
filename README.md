@@ -169,7 +169,7 @@ python manage.py runserver
 
 ## Ссылка на деплой
 
-**[https://ваш-username.pythonanywhere.com](https://%D0%B2%D0%B0%D1%88-username.pythonanywhere.com)**
+...
 
 ## Лицензия
 
